@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#3a00b3">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>253 Otobüs</title>
+<style>
+  :root{
+    --bg:#f4f2fb; --card:#ffffff; --ink:#1d1b2b; --mute:#6b6880; --brand:#3a00b3; --accent:#3a00b3; --line:#e3dff2;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#14121d; --card:#201d2f; --ink:#f1eefc; --mute:#9d98b5; --brand:#6d3cff; --accent:#b9a2ff; --line:#322e47; }
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-tap-highlight-color:transparent}
+  main{max-width:520px;margin:0 auto;padding:max(16px,env(safe-area-inset-top)) 16px 32px}
+  header{display:flex;align-items:baseline;gap:10px;margin-bottom:14px}
+  .line{background:var(--brand);color:#fff;font-weight:700;padding:4px 10px;border-radius:8px;font-size:18px}
+  .stop{color:var(--mute);font-size:14px}
+  .hero{background:var(--card);border:1px solid var(--line);border-radius:22px;padding:26px 20px;text-align:center}
+  .label{color:var(--mute);font-size:14px;margin-bottom:6px}
+  .big{font-size:84px;line-height:1;font-weight:800;color:var(--accent);letter-spacing:-2px}
+  .big small{font-size:30px;font-weight:600;letter-spacing:0;margin-left:6px}
+  .at{margin-top:12px;font-size:20px;font-weight:600}
+  .sub{margin-top:6px;color:var(--mute);font-size:14px}
+  h2{font-size:15px;color:var(--mute);font-weight:600;margin:22px 4px 8px}
+  .list{background:var(--card);border:1px solid var(--line);border-radius:18px;overflow:hidden}
+  .row{display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-top:1px solid var(--line);font-size:18px}
+  .row:first-child{border-top:0}
+  .row .t{font-weight:700}
+  .row .m{color:var(--mute);font-size:15px}
+  .warn{margin-top:14px;padding:10px 14px;border-radius:12px;background:#fff3cd;color:#664d03;font-size:13px;display:none}
+  details{margin-top:22px}
+  summary{cursor:pointer;color:var(--mute);font-size:15px;padding:6px 4px}
+  .all{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px}
+  .chip{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 0;text-align:center;font-size:15px;font-variant-numeric:tabular-nums}
+  .chip.past{opacity:.35}
+  .chip.next{background:var(--brand);color:#fff;border-color:var(--brand);font-weight:700}
+  footer{margin-top:20px;color:var(--mute);font-size:12px;text-align:center}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <span class="line">253</span>
+    <span class="stop">Durak 2814 · Harikalar Diyarı – Ahievran Aktarma Ring</span>
+  </header>
+
+  <section class="hero" aria-live="polite">
+    <div class="label" id="label">Sıradaki otobüs</div>
+    <div class="big" id="big">–</div>
+    <div class="at" id="at"></div>
+    <div class="sub" id="sub"></div>
+  </section>
+
+  <div class="warn" id="warn"></div>
+
+  <h2>Ondan sonrakiler</h2>
+  <div class="list" id="following"></div>
+
+  <details>
+    <summary>Bugünün tüm saatleri</summary>
+    <div class="all" id="all"></div>
+  </details>
+
+  <footer>İnternet gerekmez. Saatler Kayseri Ulaşım uygulamasından alınmıştır.</footer>
+</main>
+
+<script>
+/* ---------- VERİ ----------
+   Biçim: "SS:DD/araç". Hafta sonu ayrı saatler varsa aşağıdaki
+   saturday ve sunday alanlarına aynı biçimde yazılabilir. */
+const WEEKDAY = [
+  "05:58/373","06:30/200","06:50/222","07:08/373","07:28/200","07:48/222","08:08/373","08:28/200",
+  "08:48/222","09:08/373","09:38/200","10:09/222","10:39/373","11:10/200","11:40/222","12:11/373",
+  "12:41/200","13:09/222","13:39/373","14:09/200","14:39/222","15:11/373","15:31/200","15:51/222",
+  "16:11/373","16:31/200","16:51/222","17:10/373","17:30/200","17:50/222","18:10/373","18:30/200",
+  "18:50/222","19:09/373","19:29/200","19:49/222","20:09/373","20:29/200","20:49/222","21:09/373",
+  "21:29/200","21:49/222","22:08/373","22:28/200","22:48/222","23:18/373","23:53/222"
+];
+const SCHEDULES = { weekday: WEEKDAY, saturday: null, sunday: null };
+/* --------------------------- */
+
+const TZ = "Europe/Istanbul";
+const DAYNAMES = ["Pazar","Pazartesi","Salı","Çarşamba","Perşembe","Cuma","Cumartesi"];
+
+function parse(list){
+  return list.map(s => { const [t,v] = s.split("/"); const [h,m] = t.split(":").map(Number); return {sec:h*3600+m*60, text:t, bus:v}; });
+}
+function istNow(){
+  const parts = new Intl.DateTimeFormat("en-GB",{timeZone:TZ,hour12:false,weekday:"short",hour:"2-digit",minute:"2-digit",second:"2-digit"}).formatToParts(new Date());
+  const o = {}; parts.forEach(p => o[p.type] = p.value);
+  const dow = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].indexOf(o.weekday);
+  return { dow, sec: (+o.hour % 24)*3600 + (+o.minute)*60 + (+o.second) };
+}
+function typeOf(dow){ return dow===0 ? "sunday" : dow===6 ? "saturday" : "weekday"; }
+function scheduleFor(dow){
+  const type = typeOf(dow);
+  const own = SCHEDULES[type];
+  return { list: parse(own || SCHEDULES.weekday), fallback: !own, type };
+}
+function fmt(diff){
+  const m = Math.floor(diff/60);
+  if (m < 1) return { n:"&lt;1", u:"dk" };
+  if (m < 60) return { n:String(m), u:"dk" };
+  const h = Math.floor(m/60), r = m % 60;
+  return { n: h + " sa" + (r ? " " + r : ""), u: r ? "dk" : "" };
+}
+
+/* Şu andan sonraki seferleri (bugün + gerekirse yarın) döndürür. */
+function upcoming(now, count){
+  const out = [];
+  const today = scheduleFor(now.dow);
+  today.list.forEach(b => { if (b.sec >= now.sec) out.push({...b, diff:b.sec-now.sec, tomorrow:false}); });
+  if (out.length < count){
+    const tm = scheduleFor((now.dow+1)%7);
+    tm.list.forEach(b => out.push({...b, diff:b.sec+86400-now.sec, tomorrow:true}));
+  }
+  return out.slice(0,count);
+}
+function lastPassed(now){
+  const l = scheduleFor(now.dow).list.filter(b => b.sec < now.sec);
+  return l.length ? {...l[l.length-1], ago: now.sec - l[l.length-1].sec} : null;
+}
+
+const $ = id => document.getElementById(id);
+
+function render(){
+  const now = istNow();
+  const sch = scheduleFor(now.dow);
+  const ups = upcoming(now, 5);
+  const next = ups[0];
+
+  if (next){
+    const f = fmt(next.diff);
+    $("big").innerHTML = f.n + (f.u ? "<small>" + f.u + "</small>" : "");
+    $("label").textContent = next.tomorrow ? "Bugünlük sefer bitti · ilk otobüs yarın" : "Sıradaki otobüs";
+    $("at").textContent = (next.tomorrow ? "Yarın " : "") + next.text + "'de durakta";
+    const lp = lastPassed(now);
+    $("sub").innerHTML = lp ? "Son geçen: " + lp.text + " (" + fmt(lp.ago).n + " " + (fmt(lp.ago).u||"") + " önce)" : "Bugünün ilk seferi";
+  }
+
+  $("following").innerHTML = ups.slice(1,5).map(b => {
+    const f = fmt(b.diff);
+    return '<div class="row"><span class="t">' + (b.tomorrow ? "Yarın " : "") + b.text + '</span><span class="m">' + f.n + " " + f.u + ' sonra</span></div>';
+  }).join("");
+
+  const w = $("warn");
+  if (sch.fallback){
+    w.style.display = "block";
+    w.textContent = DAYNAMES[now.dow] + " tarifesi eklenmedi, hafta içi saatleri gösteriliyor. Gerçek saatler farklı olabilir.";
+  } else w.style.display = "none";
+
+  const nextText = next && !next.tomorrow ? next.text : null;
+  $("all").innerHTML = sch.list.map(b => {
+    const cls = b.sec < now.sec ? "past" : (b.text === nextText ? "next" : "");
+    return '<div class="chip ' + cls + '">' + b.text + '</div>';
+  }).join("");
+}
+
+render();
+setInterval(render, 1000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) render(); });
+
+if ("serviceWorker" in navigator){
+  window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(()=>{}));
+}
+</script>
+</body>
+</html>
